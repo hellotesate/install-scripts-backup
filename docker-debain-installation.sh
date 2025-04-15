@@ -1,8 +1,8 @@
 #!/bin/bash
 # -------------------------
-# Docker 自动安装脚本
+# Docker 自动安装脚本（更新版）
 # 支持: Ubuntu / Debian / CentOS / RHEL / Fedora
-# 使用前请确保以 root 用户运行或使用 sudo 运行。
+# 请以 root 用户或 sudo 执行
 # -------------------------
 
 # 检查是否以 root 执行
@@ -11,7 +11,7 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# 检查是否已经安装了 docker
+# 如果已安装 Docker，则退出
 if command -v docker &> /dev/null; then
     echo "检测到 Docker 已经安装，退出安装。"
     exit 0
@@ -31,31 +31,52 @@ echo "检测到的操作系统: $PRETTY_NAME"
 case "$OS_ID" in
     ubuntu|debian)
         echo "正在为 $OS_ID 系统设置 Docker 安装环境..."
-        # 更新 apt 包索引
+
+        # 更新 apt 包索引，并安装支持 HTTPS 的依赖包
         apt-get update
-        # 安装必要的包
-        apt-get install -y apt-transport-https ca-certificates curl gnupg-agent software-properties-common
+        apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
         # 添加 Docker 官方 GPG 密钥
-        curl -fsSL https://download.docker.com/linux/${OS_ID}/gpg | apt-key add -
-        # 设置稳定版仓库; 获取发行版代号（例如: focal 或 buster）
-        if command -v lsb_release &> /dev/null; then
-            codename=$(lsb_release -cs)
+        curl -fsSL https://download.docker.com/linux/$OS_ID/gpg | apt-key add -
+
+        # 获取发行版代号，优先使用 /etc/os-release 中的 VERSION_CODENAME
+        if [ -n "$VERSION_CODENAME" ]; then
+            codename=$VERSION_CODENAME
         else
-            # 若系统中没有 lsb_release，则尝试从 /etc/os-release 中获取
-            codename=${VERSION_CODENAME}
+            codename=$(lsb_release -cs)
         fi
-        add-apt-repository "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/${OS_ID} ${codename} stable"
-        # 更新包索引并安装 Docker CE
+
+        # 添加 Docker 稳定版仓库
+        if [ "$OS_ID" == "ubuntu" ]; then
+            add-apt-repository "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/ubuntu $codename stable"
+        elif [ "$OS_ID" == "debian" ]; then
+            # Debian 系统没有 add-apt-repository 命令，直接创建源文件
+            echo "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/debian $codename stable" \
+                 > /etc/apt/sources.list.d/docker.list
+        fi
+
+        # 更新 apt 缓存
         apt-get update
+
+        # 安装 Docker CE、Docker CE CLI 及 containerd.io
         apt-get install -y docker-ce docker-ce-cli containerd.io
+
+        # 检查软件包候选版本是否存在
+        if ! apt-cache policy docker-ce | grep -q Candidate; then
+            echo "错误：docker-ce 软件包没有候选版本，请检查源配置或系统版本是否受支持。"
+            exit 1
+        fi
         ;;
     centos|rhel|fedora)
         echo "正在为 $OS_ID 系统设置 Docker 安装环境..."
-        # 安装依赖包
+
+        # 安装必要依赖包
         yum install -y yum-utils device-mapper-persistent-data lvm2
+
         # 添加 Docker 仓库
         yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-        # 安装 Docker CE
+
+        # 安装 Docker CE、Docker CE CLI 及 containerd.io
         yum install -y docker-ce docker-ce-cli containerd.io
         ;;
     *)
@@ -70,7 +91,7 @@ systemctl enable docker
 
 # 验证 Docker 是否安装成功
 if command -v docker &> /dev/null; then
-    echo "Docker 安装成功！"
+    echo "Docker 安装成功！版本信息："
     docker --version
 else
     echo "Docker 安装失败，请检查错误信息。"
